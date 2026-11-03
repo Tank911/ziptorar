@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ZIP to RAR Converter</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        :root {
+            --bg: #f6f7f9;
+            --card: #fff;
+            --tx: #1b1f24;
+            --mut: #6a737d;
+            --ac: #2563eb;
+            --bd: #d0d7de
+        }
+
+        @media (prefers-color-scheme:dark) {
+            :root {
+                --bg: #0f1318;
+                --card: #171c23;
+                --tx: #e6e9ee;
+                --mut: #8b96a3;
+                --ac: #5b8def;
+                --bd: #2b333d
+            }
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg);
+            color: var(--tx);
+            font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+            padding: 16px
+        }
+
+        main {
+            width: 100%;
+            max-width: 480px;
+            background: var(--card);
+            border: 1px solid var(--bd);
+            border-radius: 16px;
+            padding: 28px
+        }
+
+        h1 {
+            font-size: 1.4rem;
+            margin: 0 0 4px
+        }
+
+        p {
+            color: var(--mut);
+            margin: 0 0 20px;
+            font-size: .92rem
+        }
+
+        #drop {
+            border: 2px dashed var(--bd);
+            border-radius: 12px;
+            padding: 36px 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: .15s
+        }
+
+        #drop.over,
+        #drop:hover {
+            border-color: var(--ac)
+        }
+
+        button {
+            margin-top: 16px;
+            width: 100%;
+            padding: 12px;
+            border: 0;
+            border-radius: 10px;
+            background: var(--ac);
+            color: #fff;
+            font-size: 1rem;
+            cursor: pointer
+        }
+
+        button:disabled {
+            opacity: .4;
+            cursor: default
+        }
+
+        #st {
+            margin-top: 14px;
+            font-size: .9rem;
+            min-height: 1.2em
+        }
+
+        a#dl {
+            display: none;
+            margin-top: 10px;
+            text-align: center;
+            color: var(--ac);
+            font-weight: 600
+        }
+
+        small {
+            display: block;
+            margin-top: 18px;
+            color: var(--mut);
+            font-size: .78rem
+        }
+    </style>
+</head>
+
+<body>
+    <main>
+        <h1>ZIP → RAR</h1>
+        <p>Convert a .zip archive to .rar right in your browser. but wrong, both ZIP and RAR is archive file but Difference. Nothing is uploaded.</p>
+        <div id="drop">Drop a .zip here or click to choose<input id="f" type="file" accept=".zip" hidden></div>
+        <button id="go" disabled>Convert to RAR</button>
+        <div id="st"></div>
+        <a id="dl">Download .rar</a>
+        <small>Is unless 7z.</small>
+    </main>
+    <script>
+        const $ = s => document.getElementById(s);
+        let file = null;
+        const T = new Uint32Array(256).map((_, n) => {
+            for (let k = 0; k < 8; k++) n = n & 1 ? 0xEDB88320 ^ (n >>> 1) : n >>> 1;
+            return n >>> 0
+        });
+        const crc = (b) => {
+            let c = 0xFFFFFFFF;
+            for (let i = 0; i < b.length; i++) c = T[(c ^ b[i]) & 255] ^ (c >>> 8);
+            return (c ^ 0xFFFFFFFF) >>> 0
+        };
+        const u32 = n => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255];
+        const u64 = n => [...u32(n >>> 0), ...u32(Math.floor(n / 4294967296))];
+        const num = n => {
+            if (n < 128) return [n];
+            const b = [255];
+            for (let i = 0; i < 8; i++) {
+                b.push(n % 256);
+                n = Math.floor(n / 256)
+            }
+            return b
+        };
+        const bits = a => {
+            const o = new Array(Math.ceil(a.length / 8)).fill(0);
+            a.forEach((v, i) => {
+                if (v) o[i >> 3] |= 128 >> (i & 7)
+            });
+            return o
+        };
+
+        function pick(f) {
+            if (!f) return;
+            file = f;
+            $('drop').firstChild.textContent = f.name + ' ';
+            $('go').disabled = false;
+            $('st').textContent = '';
+            $('dl').style.display = 'none'
+        }
+        $('drop').onclick = () => $('f').click();
+        $('f').onchange = e => pick(e.target.files[0]);
+        $('drop').ondragover = e => {
+            e.preventDefault();
+            $('drop').classList.add('over')
+        };
+        $('drop').ondragleave = () => $('drop').classList.remove('over');
+        $('drop').ondrop = e => {
+            e.preventDefault();
+            $('drop').classList.remove('over');
+            pick(e.dataTransfer.files[0])
+        };
+
+        async function build(zip) {
+            const ents = Object.values(zip.files),
+                items = [];
+            for (const e of ents) {
+                const data = e.dir ? null : await e.async('uint8array');
+                items.push({
+                    name: e.name.replace(/\/$/, ''),
+                    dir: e.dir,
+                    data,
+                    empty: e.dir || data.length === 0
+                });
+            }
+            const streams = items.filter(i => !i.empty);
+            const h = [1];
+            if (streams.length) {
+                h.push(4, 6, ...num(0), ...num(streams.length), 9);
+                streams.forEach(s => h.push(...num(s.data.length)));
+                h.push(0, 7, 0x0B, ...num(streams.length), 0);
+                streams.forEach(() => h.push(1, 0x01, 0x00));
+                h.push(0x0C);
+                streams.forEach(s => h.push(...num(s.data.length)));
+                h.push(0x0A, 1);
+                streams.forEach(s => h.push(...u32(crc(s.data))));
+                h.push(0, 0);
+            }
+            h.push(5, ...num(items.length));
+            const es = items.filter(i => i.empty);
+            if (es.length) {
+                const a = bits(items.map(i => i.empty)),
+                    b = bits(es.map(i => !i.dir));
+                h.push(0x0E, ...num(a.length), ...a, 0x0F, ...num(b.length), ...b);
+            }
+            const nm = [0];
+            items.forEach(i => {
+                for (const ch of i.name) {
+                    const c = ch.codePointAt(0);
+                    const u = c > 0xFFFF ? [0xD800 + ((c - 0x10000) >> 10), 0xDC00 + ((c - 0x10000) & 1023)] : [c];
+                    u.forEach(x => nm.push(x & 255, x >> 8))
+                }
+                nm.push(0, 0)
+            });
+            h.push(0x11, ...num(nm.length), ...nm, 0, 0);
+            const head = Uint8Array.from(h);
+            const packed = streams.reduce((a, s) => a + s.data.length, 0);
+            const start = [...u64(packed), ...u64(head.length), ...u32(crc(head))];
+            const out = new Uint8Array(32 + packed + head.length);
+            out.set([0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C, 0, 4, ...u32(crc(Uint8Array.from(start))), ...start], 0);
+            let p = 32;
+            streams.forEach(s => {
+                out.set(s.data, p);
+                p += s.data.length
+            });
+            out.set(head, p);
+            return out;
+        }
+
+        $('go').onclick = async () => {
+            $('go').disabled = true;
+            $('st').textContent = 'Converting…';
+            try {
+                const zip = await JSZip.loadAsync(file);
+                const out = await build(zip);
+                const url = URL.createObjectURL(new Blob([out], {
+                    type: 'application/vnd.rard'
+                }));
+                const a = $('dl');
+                a.href = url;
+                a.download = file.name.replace(/\.zip$/i, '') + '.rar';
+                a.style.display = 'block';
+                $('st').textContent = 'Done: ' + (out.length / 1048576).toFixed(2) + ' MB';
+            } catch (e) {
+                $('st').textContent = 'Failed: ' + e.message
+            }
+            $('go').disabled = false;
+        };
+    </script>
+</body>
+
+  </html>
