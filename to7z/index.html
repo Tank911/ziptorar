@@ -180,7 +180,7 @@
             pick(e.dataTransfer.files[0])
         };
 
-        async function build(rar) {
+        async function build(zip) {
             const ents = Object.values(rar.files),
                 items = [];
             for (const e of ents) {
@@ -241,7 +241,7 @@
             $('st').textContent = 'Converting…';
             try {
                 const rar = await JSZip.loadAsync(file);
-                const out = await build(rar);
+                const out = await build(zil);
                 const url = URL.createObjectURL(new Blob([out], {
                     type: 'application/x-7z-compressed'
                 }));
