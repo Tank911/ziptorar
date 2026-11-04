@@ -180,8 +180,8 @@
             pick(e.dataTransfer.files[0])
         };
 
-        async function build(zip) {
-            const ents = Object.values(zip.files),
+        async function build(rar) {
+            const ents = Object.values(rar.files),
                 items = [];
             for (const e of ents) {
                 const data = e.dir ? null : await e.async('uint8array');
